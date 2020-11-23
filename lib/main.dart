@@ -182,6 +182,7 @@ class _ScanState extends State<Scan> {
 
   void onTakePictureButtonPressed() async {
     String filePath = await takePicture();
+    fileList.add(new PickedFile(filePath));
     print(filePath);
   }
 }
@@ -234,6 +235,7 @@ class _ImagePreviewState extends State<ImagePreview> {
                 final doc = pw.Document();
                 for (int i = 0; i < widget.fileList.length; i++) {
                   var imageProvider = AssetImage(widget.fileList[i].path);
+                  print(widget.fileList[i].path);
                   final PdfImage image = await pdfImageFromImageProvider(
                       pdf: doc.document, image: imageProvider);
                   doc.addPage(pw.Page(build: (pw.Context context) {
@@ -248,6 +250,16 @@ class _ImagePreviewState extends State<ImagePreview> {
         ],
       ),
       body: bodies(),
+      floatingActionButton: FloatingActionButton(
+          heroTag: "btn4",
+          child: Icon(Icons.add),
+          onPressed: () {
+            ImagePicker().getImage(source: ImageSource.gallery).then((value) {
+              setState(() {
+                widget.fileList.add(value);
+              });
+            });
+          }),
     );
   }
 }
