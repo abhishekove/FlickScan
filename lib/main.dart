@@ -32,6 +32,7 @@ class Scan extends StatefulWidget {
 class _ScanState extends State<Scan> {
   CameraController controller;
   List<CameraDescription> cameras;
+  List<PickedFile> fileList = new List();
   String imagePath;
   bool run = false;
   @override
@@ -81,6 +82,7 @@ class _ScanState extends State<Scan> {
               foregroundColor: Colors.white,
               child: Icon(Icons.camera),
               onPressed: onTakePictureButtonPressed,
+              heroTag: "btn1",
             ),
             SizedBox(
               width: 16,
@@ -98,6 +100,7 @@ class _ScanState extends State<Scan> {
         onPressed: _timeCameraClicker,
         foregroundColor: Colors.white,
         child: Icon(Icons.timer_10),
+        heroTag: "btn2",
       );
     return FloatingActionButton(
       onPressed: () {
@@ -107,6 +110,7 @@ class _ScanState extends State<Scan> {
       },
       foregroundColor: Colors.white,
       child: Icon(Icons.stop),
+      heroTag: "btn3",
     );
   }
 
@@ -114,15 +118,10 @@ class _ScanState extends State<Scan> {
     setState(() {
       run = true;
     });
-    // onTakePictureButtonPressed();
-    // while (run) {
-    //   Future.delayed(new Duration(seconds: 3), () {
-    //     print("ok");
-    //   });
-    // }
     Future.doWhile(() async {
       await takePicture().then((value) {
         print(value);
+        fileList.add(new PickedFile(value));
       });
       await Future.delayed(new Duration(seconds: 7));
       return run;
@@ -155,6 +154,20 @@ class _ScanState extends State<Scan> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        actions: [
+          IconButton(
+              icon: Icon(Icons.edit),
+              onPressed: () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => ImagePreview(
+                              fileList: fileList,
+                            )));
+              }),
+        ],
+      ),
       body: Stack(
         children: [
           _getMainWidget(),
@@ -167,6 +180,38 @@ class _ScanState extends State<Scan> {
   void onTakePictureButtonPressed() async {
     String filePath = await takePicture();
     print(filePath);
+  }
+}
+
+class ImagePreview extends StatefulWidget {
+  final List<PickedFile> fileList;
+
+  const ImagePreview({Key key, this.fileList}) : super(key: key);
+  @override
+  _ImagePreviewState createState() => _ImagePreviewState();
+}
+
+class _ImagePreviewState extends State<ImagePreview> {
+  Widget bodies() {
+    return new ListView.builder(
+        itemCount: widget.fileList.length,
+        itemBuilder: (BuildContext ctx, int index) {
+          return Padding(
+            padding: EdgeInsets.all(8.0),
+            child: Column(
+              children: [
+                Image.file(File(widget.fileList[index].path)),
+              ],
+            ),
+          );
+        });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: bodies(),
+    );
   }
 }
 
