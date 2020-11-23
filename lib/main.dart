@@ -9,6 +9,9 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:simple_edge_detection/edge_detection.dart';
 
 void main() {
@@ -198,10 +201,23 @@ class _ImagePreviewState extends State<ImagePreview> {
         itemBuilder: (BuildContext ctx, int index) {
           return Padding(
             padding: EdgeInsets.all(8.0),
-            child: Column(
-              children: [
-                Image.file(File(widget.fileList[index].path)),
-              ],
+            child: GestureDetector(
+              child: Card(
+                elevation: 20,
+                child: Column(
+                  children: [
+                    Image.file(File(widget.fileList[index].path)),
+                  ],
+                ),
+              ),
+              onTap: () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => Draw(
+                              imageFile: widget.fileList[index],
+                            )));
+              },
             ),
           );
         });
@@ -210,6 +226,27 @@ class _ImagePreviewState extends State<ImagePreview> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        actions: [
+          IconButton(
+              icon: Icon(Icons.save_alt),
+              onPressed: () async {
+                final doc = pw.Document();
+                for (int i = 0; i < widget.fileList.length; i++) {
+                  var imageProvider = AssetImage(widget.fileList[i].path);
+                  final PdfImage image = await pdfImageFromImageProvider(
+                      pdf: doc.document, image: imageProvider);
+                  doc.addPage(pw.Page(build: (pw.Context context) {
+                    return pw.Center(
+                      child: pw.Image(image),
+                    );
+                  }));
+                }
+                await Printing.sharePdf(
+                    bytes: doc.save(), filename: "test.pdf");
+              }),
+        ],
+      ),
       body: bodies(),
     );
   }
