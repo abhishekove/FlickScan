@@ -183,7 +183,6 @@ class _ScanState extends State<Scan> {
   void onTakePictureButtonPressed() async {
     String filePath = await takePicture();
     fileList.add(new PickedFile(filePath));
-    print(filePath);
   }
 }
 
@@ -205,9 +204,24 @@ class _ImagePreviewState extends State<ImagePreview> {
             child: GestureDetector(
               child: Card(
                 elevation: 20,
+                color: Colors.black,
                 child: Column(
                   children: [
                     Image.file(File(widget.fileList[index].path)),
+                    SizedBox(
+                      height: 10,
+                    ),
+                    IconButton(
+                        icon: Icon(
+                          Icons.delete,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            widget.fileList.removeAt(index);
+                          });
+                        }),
                   ],
                 ),
               ),
@@ -234,14 +248,29 @@ class _ImagePreviewState extends State<ImagePreview> {
               onPressed: () async {
                 final doc = pw.Document();
                 for (int i = 0; i < widget.fileList.length; i++) {
-                  print(widget.fileList[i].path);
-                  final PdfImage image = PdfImage.file(doc.document,
-                      bytes: File(widget.fileList[i].path).readAsBytesSync());
-                  doc.addPage(pw.Page(build: (pw.Context context) {
-                    return pw.Center(
-                      child: pw.Image(image),
-                    );
-                  }));
+                  File list = File(widget.fileList[i].path);
+                  EdgeDetectionResult edgeDetectionResult =
+                      new EdgeDetectionResult(
+                          topLeft: new Offset(0.0, 0.0),
+                          topRight: new Offset(1.0, 0.0),
+                          bottomLeft: new Offset(0.0, 1.0),
+                          bottomRight: new Offset(1.0, 1.0));
+                  await EdgeDetector()
+                      .processImage(
+                          list.path, edgeDetectionResult, 0 * 90.0 * -1)
+                      .then((value) {
+                    setState(() {
+                      imageCache.clearLiveImages();
+                      imageCache.clear();
+                    });
+                    final PdfImage image = PdfImage.file(doc.document,
+                        bytes: list.readAsBytesSync());
+                    doc.addPage(pw.Page(build: (pw.Context context) {
+                      return pw.Center(
+                        child: pw.Image(image),
+                      );
+                    }));
+                  });
                 }
                 await Printing.sharePdf(
                     bytes: doc.save(), filename: "test.pdf");
@@ -506,6 +535,7 @@ class _DrawState extends State<Draw> {
 
   tp() async {
     List<Offset> list = new List();
+    await EdgeDetector().detectEdges(widget.imageFile.path);
     list.add(new Offset(10 * (image.height / MediaQuery.of(context).size.width),
         10 * (image.height / MediaQuery.of(context).size.width)));
     list.add(new Offset(
