@@ -234,10 +234,9 @@ class _ImagePreviewState extends State<ImagePreview> {
               onPressed: () async {
                 final doc = pw.Document();
                 for (int i = 0; i < widget.fileList.length; i++) {
-                  var imageProvider = AssetImage(widget.fileList[i].path);
                   print(widget.fileList[i].path);
-                  final PdfImage image = await pdfImageFromImageProvider(
-                      pdf: doc.document, image: imageProvider);
+                  final PdfImage image = PdfImage.file(doc.document,
+                      bytes: File(widget.fileList[i].path).readAsBytesSync());
                   doc.addPage(pw.Page(build: (pw.Context context) {
                     return pw.Center(
                       child: pw.Image(image),
