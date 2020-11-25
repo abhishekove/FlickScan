@@ -6,8 +6,10 @@ import 'dart:typed_data';
 import 'dart:ui';
 import 'dart:ui' as ui;
 
+import 'package:advance_pdf_viewer/advance_pdf_viewer.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:path_provider/path_provider.dart';
@@ -18,6 +20,14 @@ import 'package:simple_edge_detection/edge_detection.dart';
 
 void main() {
   runApp(MyApp());
+}
+
+void showSnackbar(dynamic a) {
+  print(a.toString());
+  Fluttertoast.showToast(
+    msg: "${a.toString()}",
+    backgroundColor: Colors.grey,
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -100,6 +110,7 @@ class _ScanState extends State<Scan> {
   }
 
   Widget decider() {
+    permissionTaker();
     if (!run)
       return FloatingActionButton(
         onPressed: _timeCameraClicker,
@@ -159,21 +170,20 @@ class _ScanState extends State<Scan> {
   void permissionTaker() async {
     if (await Nearby().checkLocationPermission()) {
     } else {
-      Nearby().askLocationPermission();
+      Nearby().askLocationAndExternalStoragePermission();
     }
     if (await Nearby().checkExternalStoragePermission()) {
     } else {
-      Nearby().askExternalStoragePermission();
+      Nearby().askLocationAndExternalStoragePermission();
     }
     if (await Nearby().checkLocationEnabled()) {
     } else {
-      Nearby().askExternalStoragePermission();
+      Nearby().enableLocationServices();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    permissionTaker();
     return Scaffold(
       appBar: AppBar(
         actions: [
@@ -220,14 +230,11 @@ class _ReceivedPdfViewerState extends State<ReceivedPdfViewer> {
   final String userName = Random().nextInt(2000).toString();
   final Strategy strategy = Strategy.P2P_STAR;
 
+  PDFDocument doc;
   String cId = "0";
+  PDFPage page;
   File tempFile;
   Map<int, String> map = Map();
-  void showSnackbar(dynamic a) {
-    Scaffold.of(context).showSnackBar(SnackBar(
-      content: Text(a.toString()),
-    ));
-  }
 
   void onConnectionInit(String id, ConnectionInfo info) {
     showModalBottomSheet(
@@ -296,6 +303,7 @@ class _ReceivedPdfViewerState extends State<ReceivedPdfViewer> {
                           //bytes not received till yet
                           map[payloadTransferUpdate.id] = "";
                         }
+                        // document();
                       }
                     },
                   );
@@ -319,7 +327,19 @@ class _ReceivedPdfViewerState extends State<ReceivedPdfViewer> {
     );
   }
 
+  void document() async {
+    doc = await PDFDocument.fromFile(tempFile);
+    // page = await d
+    print(doc.count);
+    // setState(() {});
+  }
+
   Widget decider() {
+    if (doc != null) {
+      return Center(
+        child: page,
+      );
+    }
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(8.0),
@@ -365,7 +385,12 @@ class _ReceivedPdfViewerState extends State<ReceivedPdfViewer> {
 
   @override
   Widget build(BuildContext context) {
-    return decider();
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Check"),
+      ),
+      body: decider(),
+    );
   }
 }
 
@@ -428,9 +453,41 @@ class _ImagePreviewState extends State<ImagePreview> {
         actions: [
           IconButton(
             icon: Icon(Icons.wifi_tethering_sharp),
-            onPressed: () {
+            onPressed: () async {
+              final doc = pw.Document();
+              for (int i = 0; i < widget.fileList.length; i++) {
+                File list = File(widget.fileList[i].path);
+                EdgeDetectionResult edgeDetectionResult =
+                    new EdgeDetectionResult(
+                        topLeft: new Offset(0.0, 0.0),
+                        topRight: new Offset(1.0, 0.0),
+                        bottomLeft: new Offset(0.0, 1.0),
+                        bottomRight: new Offset(1.0, 1.0));
+                await EdgeDetector()
+                    .processImage(list.path, edgeDetectionResult, 0 * 90.0 * -1)
+                    .then((value) {
+                  setState(() {
+                    imageCache.clearLiveImages();
+                    imageCache.clear();
+                  });
+                  final PdfImage image = PdfImage.file(doc.document,
+                      bytes: list.readAsBytesSync());
+                  doc.addPage(pw.Page(build: (pw.Context context) {
+                    return pw.Center(
+                      child: pw.Image(image),
+                    );
+                  }));
+                });
+              }
+              final output = await getTemporaryDirectory();
+              final file = File("${output.path}/example.pdf");
+              file.writeAsBytesSync(doc.save());
               Navigator.push(
-                  context, MaterialPageRoute(builder: (context) => PdfShare()));
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => PdfShare(
+                            filePath: file.path,
+                          )));
             },
           ),
           IconButton(
@@ -483,6 +540,9 @@ class _ImagePreviewState extends State<ImagePreview> {
 }
 
 class PdfShare extends StatefulWidget {
+  final String filePath;
+
+  const PdfShare({Key key, this.filePath}) : super(key: key);
   @override
   _PdfShareState createState() => _PdfShareState();
 }
@@ -494,11 +554,6 @@ class _PdfShareState extends State<PdfShare> {
   String cId = "0";
   File tempFile;
   Map<int, String> map = Map();
-  void showSnackbar(dynamic a) {
-    Scaffold.of(context).showSnackBar(SnackBar(
-      content: Text(a.toString()),
-    ));
-  }
 
   void onConnectionInit(String id, ConnectionInfo info) {
     showModalBottomSheet(
@@ -660,6 +715,21 @@ class _PdfShareState extends State<PdfShare> {
                 ),
               ],
             ),
+            RaisedButton(
+              child: Text("Send File Payload"),
+              onPressed: () async {
+                File file = new File(widget.filePath);
+
+                if (file == null) return;
+
+                int payloadId = await Nearby().sendFilePayload(cId, file.path);
+                showSnackbar("Sending file to $cId");
+                Nearby().sendBytesPayload(
+                    cId,
+                    Uint8List.fromList(
+                        "$payloadId:${file.path.split('/').last}".codeUnits));
+              },
+            )
           ],
         ),
       ),
@@ -668,7 +738,9 @@ class _PdfShareState extends State<PdfShare> {
 
   @override
   Widget build(BuildContext context) {
-    return decider();
+    return Scaffold(
+      body: decider(),
+    );
   }
 }
 
