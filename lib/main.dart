@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui';
 import 'dart:ui' as ui;
@@ -8,6 +9,7 @@ import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:nearby_connections/nearby_connections.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -154,8 +156,24 @@ class _ScanState extends State<Scan> {
     return filePath;
   }
 
+  void permissionTaker() async {
+    if (await Nearby().checkLocationPermission()) {
+    } else {
+      Nearby().askLocationPermission();
+    }
+    if (await Nearby().checkExternalStoragePermission()) {
+    } else {
+      Nearby().askExternalStoragePermission();
+    }
+    if (await Nearby().checkLocationEnabled()) {
+    } else {
+      Nearby().askExternalStoragePermission();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    permissionTaker();
     return Scaffold(
       appBar: AppBar(
         actions: [
@@ -169,6 +187,13 @@ class _ScanState extends State<Scan> {
                               fileList: fileList,
                             )));
               }),
+          IconButton(
+            icon: Icon(Icons.wifi),
+            onPressed: () {
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (context) => ReceivedPdfViewer()));
+            },
+          ),
         ],
       ),
       body: Stack(
@@ -183,6 +208,164 @@ class _ScanState extends State<Scan> {
   void onTakePictureButtonPressed() async {
     String filePath = await takePicture();
     fileList.add(new PickedFile(filePath));
+  }
+}
+
+class ReceivedPdfViewer extends StatefulWidget {
+  @override
+  _ReceivedPdfViewerState createState() => _ReceivedPdfViewerState();
+}
+
+class _ReceivedPdfViewerState extends State<ReceivedPdfViewer> {
+  final String userName = Random().nextInt(2000).toString();
+  final Strategy strategy = Strategy.P2P_STAR;
+
+  String cId = "0";
+  File tempFile;
+  Map<int, String> map = Map();
+  void showSnackbar(dynamic a) {
+    Scaffold.of(context).showSnackBar(SnackBar(
+      content: Text(a.toString()),
+    ));
+  }
+
+  void onConnectionInit(String id, ConnectionInfo info) {
+    showModalBottomSheet(
+      context: context,
+      builder: (builder) {
+        return Center(
+          child: Column(
+            children: <Widget>[
+              Text("id: " + id),
+              Text("Token: " + info.authenticationToken),
+              Text("Name" + info.endpointName),
+              Text("Incoming: " + info.isIncomingConnection.toString()),
+              RaisedButton(
+                child: Text("Accept Connection"),
+                onPressed: () {
+                  Navigator.pop(context);
+                  cId = id;
+                  Nearby().acceptConnection(
+                    id,
+                    onPayLoadRecieved: (endid, payload) async {
+                      if (payload.type == PayloadType.BYTES) {
+                        String str = String.fromCharCodes(payload.bytes);
+                        showSnackbar(endid + ": " + str);
+
+                        if (str.contains(':')) {
+                          // used for file payload as file payload is mapped as
+                          // payloadId:filename
+                          int payloadId = int.parse(str.split(':')[0]);
+                          String fileName = (str.split(':')[1]);
+
+                          if (map.containsKey(payloadId)) {
+                            if (await tempFile.exists()) {
+                              tempFile.rename(
+                                  tempFile.parent.path + "/" + fileName);
+                            } else {
+                              showSnackbar("File doesnt exist");
+                            }
+                          } else {
+                            //add to map if not already
+                            map[payloadId] = fileName;
+                          }
+                        }
+                      } else if (payload.type == PayloadType.FILE) {
+                        showSnackbar(endid + ": File transfer started");
+                        tempFile = File(payload.filePath);
+                      }
+                    },
+                    onPayloadTransferUpdate: (endid, payloadTransferUpdate) {
+                      if (payloadTransferUpdate.status ==
+                          PayloadStatus.IN_PROGRRESS) {
+                        print(payloadTransferUpdate.bytesTransferred);
+                      } else if (payloadTransferUpdate.status ==
+                          PayloadStatus.FAILURE) {
+                        print("failed");
+                        showSnackbar(endid + ": FAILED to transfer file");
+                      } else if (payloadTransferUpdate.status ==
+                          PayloadStatus.SUCCESS) {
+                        showSnackbar(
+                            "success, total bytes = ${payloadTransferUpdate.totalBytes}");
+
+                        if (map.containsKey(payloadTransferUpdate.id)) {
+                          //rename the file now
+                          String name = map[payloadTransferUpdate.id];
+                          tempFile.rename(tempFile.parent.path + "/" + name);
+                        } else {
+                          //bytes not received till yet
+                          map[payloadTransferUpdate.id] = "";
+                        }
+                      }
+                    },
+                  );
+                },
+              ),
+              RaisedButton(
+                child: Text("Reject Connection"),
+                onPressed: () async {
+                  Navigator.pop(context);
+                  try {
+                    await Nearby().rejectConnection(id);
+                  } catch (e) {
+                    showSnackbar(e);
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget decider() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: ListView(
+          children: [
+            Text("User Name: " + userName),
+            Wrap(
+              children: <Widget>[
+                RaisedButton(
+                  child: Text("Start Advertising"),
+                  onPressed: () async {
+                    try {
+                      bool a = await Nearby().startAdvertising(
+                        userName,
+                        strategy,
+                        onConnectionInitiated: onConnectionInit,
+                        onConnectionResult: (id, status) {
+                          showSnackbar(status);
+                        },
+                        onDisconnected: (id) {
+                          showSnackbar("Disconnected: " + id);
+                        },
+                      );
+                      showSnackbar("ADVERTISING: " + a.toString());
+                    } catch (exception) {
+                      showSnackbar(exception);
+                    }
+                  },
+                ),
+                RaisedButton(
+                  child: Text("Stop Advertising"),
+                  onPressed: () async {
+                    await Nearby().stopAdvertising();
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return decider();
   }
 }
 
@@ -244,6 +427,13 @@ class _ImagePreviewState extends State<ImagePreview> {
       appBar: AppBar(
         actions: [
           IconButton(
+            icon: Icon(Icons.wifi_tethering_sharp),
+            onPressed: () {
+              Navigator.push(
+                  context, MaterialPageRoute(builder: (context) => PdfShare()));
+            },
+          ),
+          IconButton(
               icon: Icon(Icons.save_alt),
               onPressed: () async {
                 final doc = pw.Document();
@@ -289,6 +479,196 @@ class _ImagePreviewState extends State<ImagePreview> {
             });
           }),
     );
+  }
+}
+
+class PdfShare extends StatefulWidget {
+  @override
+  _PdfShareState createState() => _PdfShareState();
+}
+
+class _PdfShareState extends State<PdfShare> {
+  final String userName = Random().nextInt(2000).toString();
+  final Strategy strategy = Strategy.P2P_STAR;
+
+  String cId = "0";
+  File tempFile;
+  Map<int, String> map = Map();
+  void showSnackbar(dynamic a) {
+    Scaffold.of(context).showSnackBar(SnackBar(
+      content: Text(a.toString()),
+    ));
+  }
+
+  void onConnectionInit(String id, ConnectionInfo info) {
+    showModalBottomSheet(
+      context: context,
+      builder: (builder) {
+        return Center(
+          child: Column(
+            children: <Widget>[
+              Text("id: " + id),
+              Text("Token: " + info.authenticationToken),
+              Text("Name" + info.endpointName),
+              Text("Incoming: " + info.isIncomingConnection.toString()),
+              RaisedButton(
+                child: Text("Accept Connection"),
+                onPressed: () {
+                  Navigator.pop(context);
+                  cId = id;
+                  Nearby().acceptConnection(
+                    id,
+                    onPayLoadRecieved: (endid, payload) async {
+                      if (payload.type == PayloadType.BYTES) {
+                        String str = String.fromCharCodes(payload.bytes);
+                        showSnackbar(endid + ": " + str);
+
+                        if (str.contains(':')) {
+                          // used for file payload as file payload is mapped as
+                          // payloadId:filename
+                          int payloadId = int.parse(str.split(':')[0]);
+                          String fileName = (str.split(':')[1]);
+
+                          if (map.containsKey(payloadId)) {
+                            if (await tempFile.exists()) {
+                              tempFile.rename(
+                                  tempFile.parent.path + "/" + fileName);
+                            } else {
+                              showSnackbar("File doesnt exist");
+                            }
+                          } else {
+                            //add to map if not already
+                            map[payloadId] = fileName;
+                          }
+                        }
+                      } else if (payload.type == PayloadType.FILE) {
+                        showSnackbar(endid + ": File transfer started");
+                        tempFile = File(payload.filePath);
+                      }
+                    },
+                    onPayloadTransferUpdate: (endid, payloadTransferUpdate) {
+                      if (payloadTransferUpdate.status ==
+                          PayloadStatus.IN_PROGRRESS) {
+                        print(payloadTransferUpdate.bytesTransferred);
+                      } else if (payloadTransferUpdate.status ==
+                          PayloadStatus.FAILURE) {
+                        print("failed");
+                        showSnackbar(endid + ": FAILED to transfer file");
+                      } else if (payloadTransferUpdate.status ==
+                          PayloadStatus.SUCCESS) {
+                        showSnackbar(
+                            "success, total bytes = ${payloadTransferUpdate.totalBytes}");
+
+                        if (map.containsKey(payloadTransferUpdate.id)) {
+                          //rename the file now
+                          String name = map[payloadTransferUpdate.id];
+                          tempFile.rename(tempFile.parent.path + "/" + name);
+                        } else {
+                          //bytes not received till yet
+                          map[payloadTransferUpdate.id] = "";
+                        }
+                      }
+                    },
+                  );
+                },
+              ),
+              RaisedButton(
+                child: Text("Reject Connection"),
+                onPressed: () async {
+                  Navigator.pop(context);
+                  try {
+                    await Nearby().rejectConnection(id);
+                  } catch (e) {
+                    showSnackbar(e);
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget decider() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: ListView(
+          children: [
+            Text("User Name: " + userName),
+            Wrap(
+              children: <Widget>[
+                RaisedButton(
+                  child: Text("Start Discovery"),
+                  onPressed: () async {
+                    try {
+                      bool a = await Nearby().startDiscovery(
+                        userName,
+                        strategy,
+                        onEndpointFound: (id, name, serviceId) {
+                          // show sheet automatically to request connection
+                          showModalBottomSheet(
+                            context: context,
+                            builder: (builder) {
+                              return Center(
+                                child: Column(
+                                  children: <Widget>[
+                                    Text("id: " + id),
+                                    Text("Name: " + name),
+                                    Text("ServiceId: " + serviceId),
+                                    RaisedButton(
+                                      child: Text("Request Connection"),
+                                      onPressed: () {
+                                        Navigator.pop(context);
+                                        Nearby().requestConnection(
+                                          userName,
+                                          id,
+                                          onConnectionInitiated: (id, info) {
+                                            onConnectionInit(id, info);
+                                          },
+                                          onConnectionResult: (id, status) {
+                                            showSnackbar(status);
+                                          },
+                                          onDisconnected: (id) {
+                                            showSnackbar(id);
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          );
+                        },
+                        onEndpointLost: (id) {
+                          showSnackbar("Lost Endpoint:" + id);
+                        },
+                      );
+                      showSnackbar("DISCOVERING: " + a.toString());
+                    } catch (e) {
+                      showSnackbar(e);
+                    }
+                  },
+                ),
+                RaisedButton(
+                  child: Text("Stop Discovery"),
+                  onPressed: () async {
+                    await Nearby().stopDiscovery();
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return decider();
   }
 }
 
